@@ -30,3 +30,8 @@ class ProductRead(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ProductPage(BaseModel):
+    items: list[ProductRead]
+    total: int

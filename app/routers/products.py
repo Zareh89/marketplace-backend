@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.storage import delete_product_image, upload_product_image
@@ -8,7 +8,7 @@ from app.db.session import get_db
 from app.models.product import Product
 from app.models.user import User, UserRole
 from app.routers.auth import get_current_user
-from app.schemas.product import ProductCreate, ProductRead, ProductUpdate
+from app.schemas.product import ProductCreate, ProductPage, ProductRead, ProductUpdate
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -62,6 +62,29 @@ def list_my_products(
         .order_by(Product.created_at.desc())
         .all()
     )
+
+
+@router.get("", response_model=ProductPage)
+def list_products(
+    search: str | None = None,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+) -> ProductPage:
+    query = db.query(Product)
+    if search:
+        query = query.filter(Product.title.ilike(f"%{search}%"))
+    total = query.count()
+    items = query.order_by(Product.created_at.desc()).offset(offset).limit(limit).all()
+    return ProductPage(items=items, total=total)
+
+
+@router.get("/{product_id}", response_model=ProductRead)
+def get_product(product_id: uuid.UUID, db: Session = Depends(get_db)) -> Product:
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    return product
 
 
 @router.patch("/{product_id}", response_model=ProductRead)

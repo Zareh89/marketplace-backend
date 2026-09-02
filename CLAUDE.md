@@ -103,46 +103,65 @@ ProductCreate/ProductRead schemas. See git history — do not redo this batch.
 
 ---
 
-## CURRENT TASK — Product images + edit/delete
+## DONE — Product images + edit/delete
 
-Extend the Product API: image upload, and edit/delete for the seller's own
-products. This is the first batch of a larger "make products fully usable
-for buyers" effort — later batches will add a public catalog; do NOT build
-that yet.
+POST /products/{id}/image (multipart upload to GCS), PATCH /products/{id}
+(partial update), DELETE /products/{id} (also deletes GCS image). All
+seller-only, ownership-checked. See git history — do not redo this batch.
+
+---
+
+## CURRENT TASK — Public product catalog (read-only, for buyers)
+
+Add read-only, unauthenticated endpoints so anyone (including logged-out
+visitors) can browse all sellers' products. This is intentionally
+read-only — no cart, no orders, no checkout yet. Buying itself is a later
+batch; do NOT build it now.
 
 ### Deliverables
 
-1. Migration: add `image_url` (string, nullable) to `products`.
+1. New routes in app/routers/products.py, placed BEFORE `/mine` if there's
+   any path-matching ambiguity (there shouldn't be, since these are
+   unauthenticated — no `Depends(get_current_seller)` — but keep route
+   order sane regardless):
+   - GET /products — public, no auth required. Returns products from ALL
+     sellers, newest first (same ordering as /mine), PAGINATED via
+     `limit`/`offset` query params (limit default 20, max 100; offset
+     default 0). Also accepts an optional `search` query param (string)
+     that filters by case-insensitive substring match on `title` before
+     pagination is applied — e.g. GET /products?search=camera&limit=20.
+     Response is NOT a bare list — it's `ProductPage` (see schema below)
+     so the frontend can render a pager/know the total count.
+   - GET /products/{id} — public, no auth required. Returns a single
+     ProductRead by id, or 404 if it doesn't exist. This is for a product
+     detail page on the frontend.
 
-2. GCS integration (app/core/storage.py or similar):
-   - Read bucket name from Settings (new env var, e.g. GCS_BUCKET_NAME).
-   - A small upload helper using google-cloud-storage — add it to
-     requirements.txt with a stated reason (this task).
-
-3. New routes (app/routers/products.py):
-   - POST /products/{id}/image (Bearer token, seller-only, must own the
-     product -> 403/404 otherwise) — accepts multipart/form-data file
-     upload, uploads to GCS, saves the public URL to image_url, returns
-     the updated ProductRead.
-   - PATCH /products/{id} (Bearer token, must own the product) — partial
-     update of title/description/price/stock. Returns ProductRead.
-   - DELETE /products/{id} (Bearer token, must own the product) — deletes
-     the product. Decide and document what happens to its image in GCS
-     (delete it too, to avoid orphaned files).
-
-4. ProductRead schema: add image_url (string | None).
+2. New Pydantic schema in app/schemas/product.py:
+   - ProductPage: { items: list[ProductRead], total: int }. `total` is
+     the count matching the search filter BEFORE limit/offset are
+     applied (so the frontend can compute page count).
 
 ### Acceptance criteria
 
-- A seller can upload an image for their own product; other sellers get
-  403 trying to upload/edit/delete a product they don't own.
-- PATCH allows partial updates (only sent fields change).
-- DELETE actually removes the row (and its GCS image, per the decision above).
-- image_url is null until an image is uploaded — do not fake a placeholder.
+- GET /products with no query params returns the first page (default
+  limit) of products across all sellers, with no Authorization header
+  required, plus an accurate `total`.
+- GET /products?search=xyz only counts/returns products whose title
+  contains "xyz" (case-insensitive) — `total` reflects the filtered count,
+  not the whole table.
+- GET /products?limit=5&offset=5 returns the correct second page.
+- limit is clamped/validated to (1, 100]; invalid values are a 422, not a
+  silent clamp — use FastAPI's Query validation (ge/le) rather than
+  hand-rolled clamping.
+- GET /products/{id} returns the product for a valid id; 404 for an
+  unknown id. No auth required, no ownership check (any product, any
+  visitor).
+- GET /products/mine and the seller-only mutation routes are UNCHANGED —
+  this task only adds new routes, it does not touch seller-side behavior.
 
 ### Out of scope (do NOT implement now)
 
-- Public catalog / browsing other sellers' products.
-- Multiple images per product, image resizing/thumbnails.
-- Signed URLs / direct-to-GCS upload from the frontend.
-- Categories.
+- Cart, orders, checkout, payments.
+- Categories, sorting, price-range filters.
+- Reviews/ratings.
+- Any change to auth, roles, or the seller-side product routes.
