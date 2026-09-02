@@ -64,50 +64,85 @@ Makefile
 - role: enum { buyer, seller } — default buyer
 - created_at: timestamp
 
-More entities (Product, Category, Order, etc.) will be added in later tasks.
+### Product
+
+- id: UUID (primary key)
+- title: string, required
+- description: string, nullable
+- price: numeric(10,2), required
+- stock: integer, default 0
+- seller_id: UUID (FK -> users.id), required
+- image_url: string, nullable — public GCS URL, set by POST /products/{id}/image
+- created_at: timestamp
+
+More entities (Category, Order, etc.) will be added in later tasks.
 Do NOT create them yet.
+
+## Image Storage (decided — do not re-litigate)
+
+- Product images live in a Google Cloud Storage bucket in the same GCP
+  project as Cloud Run (marketplace-507219). Only a public URL string is
+  stored in the DB (products.image_url) — never image bytes in Postgres.
+- Upload flow: the backend proxies the upload. The frontend sends the file
+  as multipart/form-data directly to the backend; the backend uploads it to
+  GCS via the google-cloud-storage SDK and stores the resulting public URL.
+  The frontend never talks to GCS directly (no signed URLs in this batch).
+- Bucket name comes from Settings (env var), never hardcoded.
 
 ---
 
-## CURRENT TASK — Authentication (first batch)
+## DONE — Authentication (first batch)
 
-Implement email/password authentication with JWT.
+Email/password auth with JWT. POST /auth/register, POST /auth/login,
+GET /auth/me. See git history for details — do not redo this batch.
+
+## DONE — Products (first batch)
+
+POST /products (seller-only, 403 for buyers), GET /products/mine.
+ProductCreate/ProductRead schemas. See git history — do not redo this batch.
+
+---
+
+## CURRENT TASK — Product images + edit/delete
+
+Extend the Product API: image upload, and edit/delete for the seller's own
+products. This is the first batch of a larger "make products fully usable
+for buyers" effort — later batches will add a public catalog; do NOT build
+that yet.
 
 ### Deliverables
 
-1. Database setup
-   - SQLAlchemy engine + session (app/db/).
-   - PostgreSQL connection string from .env.
-   - Alembic configured; generate the first migration for the User table.
+1. Migration: add `image_url` (string, nullable) to `products`.
 
-2. User model (app/models/user.py) per the data model above.
+2. GCS integration (app/core/storage.py or similar):
+   - Read bucket name from Settings (new env var, e.g. GCS_BUCKET_NAME).
+   - A small upload helper using google-cloud-storage — add it to
+     requirements.txt with a stated reason (this task).
 
-3. Pydantic schemas (app/schemas/user.py):
-   - UserCreate (email, password, role optional -> default buyer)
-   - UserRead (id, email, role, created_at) — NO password field
-   - Token (access_token, token_type)
+3. New routes (app/routers/products.py):
+   - POST /products/{id}/image (Bearer token, seller-only, must own the
+     product -> 403/404 otherwise) — accepts multipart/form-data file
+     upload, uploads to GCS, saves the public URL to image_url, returns
+     the updated ProductRead.
+   - PATCH /products/{id} (Bearer token, must own the product) — partial
+     update of title/description/price/stock. Returns ProductRead.
+   - DELETE /products/{id} (Bearer token, must own the product) — deletes
+     the product. Decide and document what happens to its image in GCS
+     (delete it too, to avoid orphaned files).
 
-4. Security (app/core/security.py):
-   - Password hashing/verify (passlib bcrypt).
-   - JWT create + decode (use a SECRET_KEY from .env, HS256).
-
-5. Auth routes (app/routers/auth.py):
-   - POST /auth/register -> create user, return UserRead
-   - POST /auth/login -> verify credentials, return Token (JWT)
-   - GET /auth/me -> protected; return current user from the JWT
-
-6. Wire routers into app/main.py.
+4. ProductRead schema: add image_url (string | None).
 
 ### Acceptance criteria
 
-- Can register a user; password is stored hashed, never returned.
-- Can log in with correct credentials and receive a JWT.
-- GET /auth/me returns the user only with a valid token, 401 otherwise.
-- Duplicate email registration returns a clear 400 error.
-- `make dev` runs the server; Alembic migration creates the users table.
+- A seller can upload an image for their own product; other sellers get
+  403 trying to upload/edit/delete a product they don't own.
+- PATCH allows partial updates (only sent fields change).
+- DELETE actually removes the row (and its GCS image, per the decision above).
+- image_url is null until an image is uploaded — do not fake a placeholder.
 
 ### Out of scope (do NOT implement now)
 
-- Refresh tokens, password reset, email verification.
-- Any product/order logic.
-- Role-based permissions beyond storing the role field.
+- Public catalog / browsing other sellers' products.
+- Multiple images per product, image resizing/thumbnails.
+- Signed URLs / direct-to-GCS upload from the frontend.
+- Categories.

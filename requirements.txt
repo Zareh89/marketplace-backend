@@ -9,3 +9,4 @@ bcrypt
 python-jose[cryptography]
 python-dotenv
 python-multipart
+google-cloud-storage

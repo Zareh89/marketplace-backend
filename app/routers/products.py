@@ -1,11 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import uuid
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.core.storage import delete_product_image, upload_product_image
 from app.db.session import get_db
 from app.models.product import Product
 from app.models.user import User, UserRole
 from app.routers.auth import get_current_user
-from app.schemas.product import ProductCreate, ProductRead
+from app.schemas.product import ProductCreate, ProductRead, ProductUpdate
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -17,6 +20,22 @@ def get_current_seller(current_user: User = Depends(get_current_user)) -> User:
             detail="Only sellers can perform this action",
         )
     return current_user
+
+
+def get_own_product(
+    product_id: uuid.UUID,
+    current_user: User = Depends(get_current_seller),
+    db: Session = Depends(get_db),
+) -> Product:
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    if product.seller_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not own this product",
+        )
+    return product
 
 
 @router.post("", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
@@ -43,3 +62,41 @@ def list_my_products(
         .order_by(Product.created_at.desc())
         .all()
     )
+
+
+@router.patch("/{product_id}", response_model=ProductRead)
+def update_product(
+    product_update: ProductUpdate,
+    product: Product = Depends(get_own_product),
+    db: Session = Depends(get_db),
+) -> Product:
+    for field, value in product_update.model_dump(exclude_unset=True).items():
+        setattr(product, field, value)
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+@router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_product(
+    product: Product = Depends(get_own_product),
+    db: Session = Depends(get_db),
+) -> None:
+    if product.image_url:
+        delete_product_image(product.image_url)
+    db.delete(product)
+    db.commit()
+
+
+@router.post("/{product_id}/image", response_model=ProductRead)
+def upload_image(
+    file: UploadFile = File(...),
+    product: Product = Depends(get_own_product),
+    db: Session = Depends(get_db),
+) -> Product:
+    if product.image_url:
+        delete_product_image(product.image_url)
+    product.image_url = upload_product_image(file.file, file.content_type)
+    db.commit()
+    db.refresh(product)
+    return product
