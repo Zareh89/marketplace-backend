@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+  # Manual "Run workflow" button / `gh workflow run` — re-deploy without an empty commit.
+  workflow_dispatch:
 
 env:
   PROJECT_ID: marketplace-507219
