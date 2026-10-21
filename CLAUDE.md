@@ -89,6 +89,29 @@ Do NOT create them yet.
   The frontend never talks to GCS directly (no signed URLs in this batch).
 - Bucket name comes from Settings (env var), never hardcoded.
 
+## AI / Claude API (decided — in progress, learning-mode)
+
+- Provider: Claude API via the official `anthropic` Python SDK, pinned
+  `anthropic>=1.15,<2` (no surprise major upgrades).
+- Dev model: Claude Haiku 5.5 (cheapest).
+- Key: `anthropic_api_key` in Settings (from `ANTHROPIC_API_KEY`), passed
+  explicitly to the client — pydantic-settings does NOT export .env into
+  os.environ, so the SDK can't auto-read it.
+- Key lives in the `marketplace-dev` Anthropic workspace ($5 spend limit).
+  Prod reuses the same key (training project — owner's call); a real
+  product would use a separate prod workspace + service account key.
+- Prod: GCP secret `marketplace-anthropic-key` (secretAccessor granted to
+  the compute SA + github-deployer, same as the other secrets), wired via
+  `--set-secrets ANTHROPIC_API_KEY=...` in .github/workflows/deploy.yml.
+  `anthropic_api_key` is a required Setting — without it Cloud Run won't start.
+
+### DONE — AI product description (backend)
+
+POST /products/generate-description (seller-only, multipart: `title` +
+optional `image` JPEG/PNG/GIF/WebP ≤ 5 MB) -> { description }. Nothing is
+saved — the seller edits the text and saves the product normally. Claude
+logic lives in app/core/ai.py (AIGenerationError -> 502 in the router).
+
 ---
 
 ## DONE — Authentication (first batch)

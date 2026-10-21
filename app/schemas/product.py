@@ -35,3 +35,7 @@ class ProductRead(BaseModel):
 class ProductPage(BaseModel):
     items: list[ProductRead]
     total: int
+
+
+class ProductDescription(BaseModel):
+    description: str

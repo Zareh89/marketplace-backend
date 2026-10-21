@@ -1,16 +1,28 @@
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.core.ai import AIGenerationError, generate_product_description
 from app.core.storage import delete_product_image, upload_product_image
 from app.db.session import get_db
 from app.models.product import Product
 from app.models.user import User, UserRole
 from app.routers.auth import get_current_user
-from app.schemas.product import ProductCreate, ProductPage, ProductRead, ProductUpdate
+from app.schemas.product import (
+    ProductCreate,
+    ProductDescription,
+    ProductPage,
+    ProductRead,
+    ProductUpdate,
+)
 
 router = APIRouter(prefix="/products", tags=["products"])
+
+# Formats Claude's vision accepts.
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+# Claude's limit is 10 MB base64; base64 adds ~33%, so 5 MB raw leaves headroom.
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 
 def get_current_seller(current_user: User = Depends(get_current_user)) -> User:
@@ -49,6 +61,38 @@ def create_product(
     db.commit()
     db.refresh(product)
     return product
+
+
+@router.post("/generate-description", response_model=ProductDescription)
+def generate_description(
+    title: str = Form(...),
+    image: UploadFile | None = File(default=None),
+    current_user: User = Depends(get_current_seller),
+) -> ProductDescription:
+    image_bytes = None
+    media_type = None
+    if image is not None:
+        if image.content_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="Image must be JPEG, PNG, GIF or WebP",
+            )
+        image_bytes = image.file.read()
+        if len(image_bytes) > MAX_IMAGE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail="Image must be 5 MB or smaller",
+            )
+        media_type = image.content_type
+
+    try:
+        description = generate_product_description(title, image_bytes, media_type)
+    except AIGenerationError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not generate a description. Please try again.",
+        )
+    return ProductDescription(description=description)
 
 
 @router.get("/mine", response_model=list[ProductRead])
