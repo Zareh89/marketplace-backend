@@ -116,7 +116,21 @@ Do NOT create them yet.
 - Access: logged-in users only (any role) to stop anonymous bots burning
   Claude spend. Future idea: gate behind a paid subscription to cover AI cost.
 - Stages: 1) learning script ✅ 2) POST /assistant/ask (no history) ✅
-  3) conversation history in DB 4) frontend chat with product cards.
+  3) conversation history in DB ✅ 4) frontend chat with product cards ✅
+- Stage 3 (session memory, decided): table `assistant_conversations`
+  (user_id, `messages` JSONB = the exact API messages array, updated_at).
+  APPEND-ONLY — Haiku 5.5 thinking blocks 400 if anything before them
+  changes (so: never trim/edit history; changing SYSTEM_PROMPT or the tool
+  breaks live conversations → users just start a new chat). Request takes
+  optional `conversation_id`; other user's id → 404; expired (24h since
+  updated_at) → silently new conversation; 20 buyer questions max → 409.
+  Each turn stores the question, every model message (to_param → plain
+  JSON via `_to_json_message`, dropping SDK-only `parsed_output`) and every
+  tool_result (`runner.generate_tool_call_response()`, cached by the SDK so
+  the tool doesn't run twice). `seen_ids` also includes ids from earlier
+  turns' tool_results so follow-ups without a new search still get cards.
+  Assign a NEW list to `conversation.messages` — SQLAlchemy doesn't track
+  in-place JSONB mutation. Not done yet: cleanup of old rows, compaction.
 - Stage 2 (app/core/assistant.py + routers/assistant.py): body
   {question ≤ 500 chars} -> {answer, products: ProductRead[]}. Final reply is
   a structured output {answer, product_ids}; ids are kept ONLY if the search

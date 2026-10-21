@@ -1,5 +1,7 @@
 import json
 import logging
+from dataclasses import dataclass
+from typing import Any
 
 import anthropic
 from anthropic import beta_tool
@@ -44,10 +46,58 @@ class _AgentReply(BaseModel):
     product_ids: list[str]  # ids (from search results) of the products you recommend
 
 
-def ask_assistant(question: str, db: Session) -> tuple[str, list[Product]]:
-    # Ids the search tool actually returned during THIS conversation.
+@dataclass
+class AssistantResult:
+    answer: str
+    products: list[Product]
+    # Everything this turn added to the conversation (the question, every model
+    # message incl. thinking/tool_use blocks, every tool_result) — to be appended
+    # to the stored history exactly as-is.
+    new_messages: list[dict[str, Any]]
+
+
+def count_questions(messages: list[dict[str, Any]]) -> int:
+    """Buyer questions in a history. tool_result turns are also role=user but
+    carry a list of blocks; the buyer's own questions are plain strings."""
+    return sum(1 for m in messages if m["role"] == "user" and isinstance(m["content"], str))
+
+
+def _to_json_message(message: Any) -> dict[str, Any]:
+    """A model message as plain JSON for the JSONB history column.
+
+    to_param() keeps blocks as SDK (pydantic) objects, which Postgres can't store.
+    `parsed_output` is an SDK-only field the API would reject when replayed.
+    """
+    param = message.to_param()
+    blocks = [
+        {k: v for k, v in b.to_dict(exclude_none=True).items() if k != "parsed_output"}
+        if isinstance(b, BaseModel)
+        else b
+        for b in param["content"]
+    ]
+    return {"role": param["role"], "content": blocks}
+
+
+def _ids_returned_in(messages: list[dict[str, Any]]) -> set[str]:
+    """Product ids our search tool returned in earlier turns of this conversation."""
+    ids: set[str] = set()
+    for m in messages:
+        if m["role"] != "user" or isinstance(m["content"], str):
+            continue
+        for block in m["content"]:
+            if block.get("type") == "tool_result" and isinstance(block.get("content"), str):
+                try:
+                    ids.update(p["id"] for p in json.loads(block["content"]))
+                except (ValueError, TypeError, KeyError):
+                    pass  # e.g. the "search unavailable" text
+    return ids
+
+
+def ask_assistant(question: str, history: list[dict[str, Any]], db: Session) -> AssistantResult:
+    # Ids the search tool actually returned in THIS conversation (earlier turns
+    # included — "which of those is warmer?" may answer without a new search).
     # Used to drop any id the model might invent.
-    seen_ids: set[str] = set()
+    seen_ids: set[str] = _ids_returned_in(history)
     searches: list[str] = []  # queries the model searched for — for the log line below
 
     @beta_tool
@@ -76,6 +126,9 @@ def ask_assistant(question: str, db: Session) -> tuple[str, list[Product]]:
             ensure_ascii=False,
         )
 
+    question_message = {"role": "user", "content": question}
+    new_messages: list[dict[str, Any]] = [question_message]
+
     runner = _client.beta.messages.tool_runner(
         model=MODEL,
         max_tokens=4000,
@@ -83,7 +136,7 @@ def ask_assistant(question: str, db: Session) -> tuple[str, list[Product]]:
         system=SYSTEM_PROMPT,
         tools=[search_products],
         output_format=_AgentReply,
-        messages=[{"role": "user", "content": question}],
+        messages=[*history, question_message],
     )
 
     steps = 0
@@ -92,6 +145,14 @@ def ask_assistant(question: str, db: Session) -> tuple[str, list[Product]]:
         for message in runner:
             final = message
             steps += 1
+            # Record the model's message exactly as the API expects it back.
+            new_messages.append(_to_json_message(message))
+            if message.stop_reason == "tool_use":
+                # Runs our tool now; the SDK caches the result, so the runner
+                # reuses it on the next step instead of calling the tool twice.
+                tool_results = runner.generate_tool_call_response()
+                if tool_results is not None:
+                    new_messages.append(tool_results)
     except anthropic.APIError as e:
         logger.error("Claude API error in assistant: %s", e)
         raise AssistantError from e
@@ -109,4 +170,8 @@ def ask_assistant(question: str, db: Session) -> tuple[str, list[Product]]:
         steps, searches, len(valid_ids), len(reply.product_ids) - len(valid_ids),
     )
     by_id = {str(p.id): p for p in db.query(Product).filter(Product.id.in_(valid_ids)).all()} if valid_ids else {}
-    return reply.answer, [by_id[pid] for pid in valid_ids if pid in by_id]
+    return AssistantResult(
+        answer=reply.answer,
+        products=[by_id[pid] for pid in valid_ids if pid in by_id],
+        new_messages=new_messages,
+    )
