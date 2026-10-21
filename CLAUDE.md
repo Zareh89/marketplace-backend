@@ -105,6 +105,28 @@ Do NOT create them yet.
   `--set-secrets ANTHROPIC_API_KEY=...` in .github/workflows/deploy.yml.
   `anthropic_api_key` is a required Setting — without it Cloud Run won't start.
 
+### IN PROGRESS — Shopping assistant agent (#4)
+
+- Claude Haiku 5.5 + SDK Tool Runner (docs' default) with one tool,
+  `search_products(query, max_price?)` (reuses the semantic search).
+- `max_iterations=8` as a cost/latency safety net, AND check the final
+  `stop_reason == "end_turn"` — the runner stops silently at the limit and
+  the last message may be an unanswered `tool_use`.
+- System prompt: recommend ONLY products the tool returned; prices are USD.
+- Access: logged-in users only (any role) to stop anonymous bots burning
+  Claude spend. Future idea: gate behind a paid subscription to cover AI cost.
+- Stages: 1) learning script ✅ 2) POST /assistant/ask (no history) ✅
+  3) conversation history in DB 4) frontend chat with product cards.
+- Stage 2 (app/core/assistant.py + routers/assistant.py): body
+  {question ≤ 500 chars} -> {answer, products: ProductRead[]}. Final reply is
+  a structured output {answer, product_ids}; ids are kept ONLY if the search
+  tool returned them in this call (closure `seen_ids`). Tool searches in-stock
+  products only (stock > 0, decided). Voyage failure inside the tool returns
+  a text message to the model instead of crashing. One INFO log line per
+  question: steps / searches / recommended / dropped_ids (logging.basicConfig
+  in main.py). Known: with tool_choice auto the model may skip searching —
+  prompt asks it to search before answering; measure with evals later.
+
 ### DONE — Semantic search (embeddings)
 
 - Voyage AI `voyage-4` (1024 dims) via `voyageai` SDK; logic in
