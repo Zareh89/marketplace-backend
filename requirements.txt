@@ -11,3 +11,5 @@ python-dotenv
 python-multipart
 google-cloud-storage
 anthropic>=1.15,<2
+voyageai>=0.5,<0.6
+pgvector>=0.5,<0.6

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy.orm import Session
 
 from app.core.ai import AIGenerationError, generate_product_description
+from app.core.embeddings import EmbeddingError, embed_document, embed_query, product_text
 from app.core.storage import delete_product_image, upload_product_image
 from app.db.session import get_db
 from app.models.product import Product
@@ -23,6 +24,8 @@ router = APIRouter(prefix="/products", tags=["products"])
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 # Claude's limit is 10 MB base64; base64 adds ~33%, so 5 MB raw leaves headroom.
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+# Semantic search ranks EVERY product, so we cap how far down the ranking we go.
+MAX_SEARCH_RESULTS = 50
 
 
 def get_current_seller(current_user: User = Depends(get_current_user)) -> User:
@@ -56,11 +59,24 @@ def create_product(
     current_user: User = Depends(get_current_seller),
     db: Session = Depends(get_db),
 ) -> Product:
-    product = Product(**product_in.model_dump(), seller_id=current_user.id)
+    product = Product(
+        **product_in.model_dump(),
+        seller_id=current_user.id,
+        embedding=build_embedding(product_in.title, product_in.description),
+    )
     db.add(product)
     db.commit()
     db.refresh(product)
     return product
+
+
+def build_embedding(title: str, description: str | None) -> list[float] | None:
+    # None if Voyage fails: the product still saves, and the backfill script
+    # fills the vector in later.
+    try:
+        return embed_document(product_text(title, description))
+    except EmbeddingError:
+        return None
 
 
 @router.post("/generate-description", response_model=ProductDescription)
@@ -116,10 +132,32 @@ def list_products(
     db: Session = Depends(get_db),
 ) -> ProductPage:
     query = db.query(Product)
-    if search:
-        query = query.filter(Product.title.ilike(f"%{search}%"))
-    total = query.count()
-    items = query.order_by(Product.created_at.desc()).offset(offset).limit(limit).all()
+    if not search:
+        # No search text: newest first, and no Voyage call.
+        total = query.count()
+        items = query.order_by(Product.created_at.desc()).offset(offset).limit(limit).all()
+        return ProductPage(items=items, total=total)
+
+    title_match = Product.title.ilike(f"%{search}%")
+    try:
+        query_vector = embed_query(search)
+    except EmbeddingError:
+        # Voyage down or rate-limited: degrade to the old title search instead of failing.
+        query = query.filter(title_match)
+        total = query.count()
+        items = query.order_by(Product.created_at.desc()).offset(offset).limit(limit).all()
+        return ProductPage(items=items, total=total)
+
+    # Hybrid ranking: exact title matches first, then everything else by meaning.
+    query = query.filter(Product.embedding.is_not(None))
+    total = min(query.count(), MAX_SEARCH_RESULTS)
+    window = max(0, min(limit, MAX_SEARCH_RESULTS - offset))
+    items = (
+        query.order_by(title_match.desc(), Product.embedding.cosine_distance(query_vector))
+        .offset(offset)
+        .limit(window)
+        .all()
+    )
     return ProductPage(items=items, total=total)
 
 
@@ -137,8 +175,13 @@ def update_product(
     product: Product = Depends(get_own_product),
     db: Session = Depends(get_db),
 ) -> Product:
-    for field, value in product_update.model_dump(exclude_unset=True).items():
+    changes = product_update.model_dump(exclude_unset=True)
+    for field, value in changes.items():
         setattr(product, field, value)
+    # Only text changes alter the meaning; price/stock edits keep the old vector.
+    # On failure we store None rather than keep a vector of the old text.
+    if "title" in changes or "description" in changes:
+        product.embedding = build_embedding(product.title, product.description)
     db.commit()
     db.refresh(product)
     return product

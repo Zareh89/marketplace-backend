@@ -12,3 +12,5 @@ migrate:
 
 makemigrations:
 	alembic revision --autogenerate -m "$(m)"
+backfill-embeddings:
+	python -m app.scripts.backfill_embeddings

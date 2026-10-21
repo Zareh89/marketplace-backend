@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -26,6 +27,9 @@ class Product(Base):
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
     image_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Semantic-search vector of title + description (voyage-4 → 1024 numbers).
+    # Nullable: old products get it from a backfill, and a Voyage outage must not block saving.
+    embedding: Mapped[list[float] | None] = mapped_column(VECTOR(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )

@@ -105,6 +105,31 @@ Do NOT create them yet.
   `--set-secrets ANTHROPIC_API_KEY=...` in .github/workflows/deploy.yml.
   `anthropic_api_key` is a required Setting — without it Cloud Run won't start.
 
+### DONE — Semantic search (embeddings)
+
+- Voyage AI `voyage-4` (1024 dims) via `voyageai` SDK; logic in
+  app/core/embeddings.py (`embed_document` / `embed_query` — different
+  `input_type`; same MODEL for both or vectors aren't comparable).
+  Client: max_retries=0, timeout=10 — fail fast inside requests.
+- `products.embedding VECTOR(1024)` nullable (pgvector; migration also runs
+  `CREATE EXTENSION IF NOT EXISTS vector`). Text = `product_text(title,
+  description)`. Computed on create; on PATCH only if title/description
+  changed; Voyage failure → NULL (never keep a stale vector).
+- Backfill: `make backfill-embeddings` (only rows with NULL, batches of 100).
+- GET /products?search=: hybrid ORDER BY (title ILIKE) DESC, cosine
+  distance ASC; NULL-embedding products excluded; capped at top 50
+  (`total` ≤ 50). Empty search = newest first, no Voyage call. Voyage error
+  → falls back to old ILIKE title search.
+- Prod: GCP secret `marketplace-voyage-key` → `VOYAGE_API_KEY`.
+- ⚠️ Prod migrations are run MANUALLY before pushing (decided): code that
+  selects Product.embedding breaks prod if the column isn't there yet.
+- ⚠️ Local .env DATABASE_URL currently points at the SAME Neon DB as prod
+  (found 2026-10-21) — "local" migrations/data hit prod. Separate dev DB
+  (local Postgres or a Neon branch) is a pending task. 12 seeded test
+  products from seller@test.com were left in prod on purpose.
+- Known gap: no similarity threshold — small catalogs show irrelevant tail
+  items. Tune a threshold later with evals.
+
 ### DONE — AI product description (backend)
 
 POST /products/generate-description (seller-only, multipart: `title` +
