@@ -147,6 +147,19 @@ Do NOT create them yet.
   must never mention suspicious listings, their claims, or reports; it just
   leaves such products out. (Earlier lesson: the model once SAID "I reported
   it" without calling the tool — never trust the model's text about actions.)
+- Off-topic requests (poems, homework, chat) are politely declined in one
+  sentence with an offer to help shop (decided; eval case 23).
+- EVAL: `make eval-assistant` (or `ids="23 24"` for a subset). 24 cases in
+  evals/assistant/cases.md (human-approved) / cases.py. Runs the REAL
+  ask_assistant per case in a rolled-back transaction; a fixture product with
+  a prompt injection is created and always deleted (finally). Code checks
+  (cards, prices, tool calls from the transcript) + Claude Sonnet 5.5 judge
+  for text meaning. ~20 min (Voyage 3 RPM pacing), ~$0.10. Reports in
+  evals/assistant/results/ (gitignored). Baseline 2026-10-22: 24/24 after
+  the off-topic fix (1 rep; case 24 was flaky once). RUN IT BEFORE ANY
+  PROMPT / TOOL / MODEL CHANGE IS DEPLOYED.
+- Never hold a DB session/transaction open for minutes — Neon kills idle
+  transactions (crashed the first eval run).
 - On failure the assistant logs stop_reason, steps, searches, flagged, the
   last message's block types/text and parsed output — for debugging in
   Cloud Run logs without reproducing.

@@ -6,3 +6,4 @@ __pycache__/
 !.env.example
 *.sqlite3
 .DS_Store
+evals/assistant/results/
