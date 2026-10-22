@@ -10,7 +10,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.embeddings import EmbeddingError, embed_query
+from app.core.embeddings import EmbeddingError
+from app.core.search import search_in_stock
 from app.models.product import Product
 from app.models.product_report import ProductReport
 
@@ -126,15 +127,10 @@ def ask_assistant(
         """
         searches.append(query)
         try:
-            query_vector = embed_query(query)
+            products = search_in_stock(db, query, max_price, SEARCH_RESULTS)
         except EmbeddingError:
             # Tell the model instead of crashing; it will explain this to the buyer.
             return "Search is temporarily unavailable. Ask the buyer to try again later."
-        # In-stock only: recommending something the buyer can't order is useless.
-        q = db.query(Product).filter(Product.embedding.is_not(None), Product.stock > 0)
-        if max_price is not None:
-            q = q.filter(Product.price <= max_price)
-        products = q.order_by(Product.embedding.cosine_distance(query_vector)).limit(SEARCH_RESULTS).all()
         seen_ids.update(str(p.id) for p in products)
         return json.dumps(
             [{"id": str(p.id), "title": p.title, "price": str(p.price), "description": p.description} for p in products],

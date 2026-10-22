@@ -42,4 +42,4 @@ jobs:
             --region ${{ env.REGION }} \
             --allow-unauthenticated \
             --set-secrets SECRET_KEY=marketplace-secret-key:latest,DATABASE_URL=marketplace-database-url:latest,ANTHROPIC_API_KEY=marketplace-anthropic-key:latest,VOYAGE_API_KEY=marketplace-voyage-key:latest \
-            --set-env-vars ALGORITHM=HS256,ACCESS_TOKEN_EXPIRE_MINUTES=30,GCS_BUCKET_NAME=marketplace-507219-product-images
+            --set-env-vars ALGORITHM=HS256,ACCESS_TOKEN_EXPIRE_MINUTES=30,GCS_BUCKET_NAME=marketplace-507219-product-images,FRONTEND_URL=https://marketplace-frontend-770988956423.us-central1.run.app

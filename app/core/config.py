@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     gcs_bucket_name: str
     anthropic_api_key: str
     voyage_api_key: str
+    # Public site URL — the MCP server returns product links people can open.
+    frontend_url: str = "http://localhost:5173"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

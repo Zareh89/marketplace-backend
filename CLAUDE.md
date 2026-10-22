@@ -105,6 +105,23 @@ Do NOT create them yet.
   `--set-secrets ANTHROPIC_API_KEY=...` in .github/workflows/deploy.yml.
   `anthropic_api_key` is a required Setting — without it Cloud Run won't start.
 
+### DONE — Public MCP server (catalog for claude.ai & other MCP clients)
+
+- app/mcp_server.py (MCP Python SDK v2: `MCPServer`, NOT v1 `FastMCP`;
+  client objects use snake_case like `input_schema`). Mounted into the main
+  FastAPI app at `/mcp` (Streamable HTTP). main.py: `app.mount("/", mcp_app)`
+  MUST stay the last line (catch-all mount); FastAPI `lifespan` must run
+  `mcp.session_manager.run()` (a mounted app's own lifespan never runs).
+  DNS-rebinding protection disabled — Cloud Run's proxy controls Host.
+- Tools: `search_products(query, max_price?)`, `get_product(product_id)` —
+  each result has `url` = FRONTEND_URL + /products/{id}. READ-ONLY on
+  purpose and no auth (catalog is public anyway); never expose write tools
+  (e.g. flag_suspicious_product) to agents we don't control.
+- Shared search: app/core/search.py `search_in_stock` (used by assistant + MCP).
+- Known risk: unauthenticated → anyone can call it; each call hits Voyage.
+  Add rate limiting if abused.
+- Users add it in Claude as a custom connector: <backend URL>/mcp.
+
 ### IN PROGRESS — Shopping assistant agent (#4)
 
 - Claude Haiku 5.5 + SDK Tool Runner (docs' default) with one tool,
