@@ -118,6 +118,9 @@ Do NOT create them yet.
   purpose and no auth (catalog is public anyway); never expose write tools
   (e.g. flag_suspicious_product) to agents we don't control.
 - Shared search: app/core/search.py `search_in_stock` (used by assistant + MCP).
+- `stateless_http=True`: Claude uses an older protocol that otherwise gets a
+  session id, and Cloud Run may route the next request to another instance
+  ("Session not found"). Our tools need no session.
 - Known risk: unauthenticated → anyone can call it; each call hits Voyage.
   Add rate limiting if abused.
 - Users add it in Claude as a custom connector: <backend URL>/mcp.

@@ -16,8 +16,12 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 # Built at module level: mcp.session_manager only exists after this call.
 # DNS-rebinding protection (localhost-only by default) is off because Cloud Run's
 # proxy already controls the Host header — the MCP SDK docs call this case out.
+# stateless_http: Claude speaks an older protocol version that would otherwise
+# get a session id; Cloud Run can route the next request to another instance,
+# which doesn't know that session ("Session not found"). Our tools need no session.
 mcp_app = mcp.streamable_http_app(
-    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    stateless_http=True,
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
 )
 
 
