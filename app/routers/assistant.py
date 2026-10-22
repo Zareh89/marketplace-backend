@@ -33,6 +33,9 @@ def get_conversation(
             return conversation
     conversation = AssistantConversation(user_id=current_user.id, messages=[])
     db.add(conversation)
+    # Flush = INSERT now (not committed yet) so the row exists and has its id —
+    # reports filed during this turn point at it via a foreign key.
+    db.flush()
     return conversation
 
 
@@ -51,7 +54,7 @@ def ask(
         )
 
     try:
-        result = ask_assistant(payload.question, conversation.messages, db)
+        result = ask_assistant(payload.question, conversation.messages, conversation.id, db)
     except AssistantError:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -63,5 +66,7 @@ def ask(
     conversation.updated_at = datetime.now(timezone.utc)
     db.commit()
     return AssistantAnswer(
-        conversation_id=conversation.id, answer=result.answer, products=result.products
+        conversation_id=conversation.id,
+        answer=result.answer,
+        products=result.products,
     )

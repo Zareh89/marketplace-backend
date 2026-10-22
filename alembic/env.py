@@ -10,6 +10,7 @@ from app.db.base import Base
 from app.models.user import User  # noqa: F401 (registers model with Base.metadata)
 from app.models.product import Product  # noqa: F401 (registers model with Base.metadata)
 from app.models.assistant_conversation import AssistantConversation  # noqa: F401
+from app.models.product_report import ProductReport  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
