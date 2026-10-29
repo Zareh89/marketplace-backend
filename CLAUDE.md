@@ -144,6 +144,14 @@ Do NOT create them yet.
   breaks live conversations → users just start a new chat). Request takes
   optional `conversation_id`; other user's id → 404; expired (24h since
   updated_at) → silently new conversation; 20 buyer questions max → 409.
+- Daily rate limit (decided 2026-10-29): table `assistant_requests`, one row
+  per attempt (user_id, created_at; index on both). `DAILY_QUESTION_LIMIT=50`
+  per user over a sliding 24h window, checked FIRST → 429 (frontend toasts
+  `detail`). Row is committed BEFORE the model call so failed calls still
+  count. In-memory limiters (slowapi) rejected: Cloud Run runs several
+  instances and restarts on deploy. Known gap: concurrent requests can pass
+  the check together (+1–2) — fine here; atomic counter (Redis) at scale.
+  Next: token columns for a $-budget limit; per-IP limit on `/mcp`.
   Each turn stores the question, every model message (to_param → plain
   JSON via `_to_json_message`, dropping SDK-only `parsed_output`) and every
   tool_result (`runner.generate_tool_call_response()`, cached by the SDK so
