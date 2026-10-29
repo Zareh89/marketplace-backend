@@ -12,6 +12,7 @@ from app.models.product import Product  # noqa: F401 (registers model with Base.
 from app.models.assistant_conversation import AssistantConversation  # noqa: F401
 from app.models.product_report import ProductReport  # noqa: F401
 from app.models.assistant_request import AssistantRequest  # noqa: F401
+from app.models.mcp_search_call import McpSearchCall  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

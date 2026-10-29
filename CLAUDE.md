@@ -121,8 +121,14 @@ Do NOT create them yet.
 - `stateless_http=True`: Claude uses an older protocol that otherwise gets a
   session id, and Cloud Run may route the next request to another instance
   ("Session not found"). Our tools need no session.
-- Known risk: unauthenticated → anyone can call it; each call hits Voyage.
-  Add rate limiting if abused.
+- Rate limit (decided 2026-10-29): GLOBAL `SEARCH_LIMIT_PER_MINUTE=20` on
+  `search_products` only (it hits the Voyage key shared with site search;
+  get_product is a DB read). Counted in table `mcp_search_calls`, row
+  committed before the Voyage call; over limit → text "Search is busy…".
+  NOT per-IP: Cloud Run logs show every claude.ai request (Claude-User) from
+  the same address — Anthropic's servers call us, so per-IP = one client for
+  all users. Per-user limits would need OAuth on the connector. Rows are
+  never cleaned up (only the last minute matters) — prune or Redis TTL at scale.
 - Users add it in Claude as a custom connector: <backend URL>/mcp.
 
 ### IN PROGRESS — Shopping assistant agent (#4)

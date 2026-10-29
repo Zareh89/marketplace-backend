@@ -6,19 +6,26 @@ flag_suspicious_product — we don't control the agents that call this.
 """
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from mcp.server import MCPServer
+from sqlalchemy import func
 
 from app.core.config import settings
 from app.core.embeddings import EmbeddingError
 from app.core.search import search_in_stock
 from app.db.session import SessionLocal
+from app.models.mcp_search_call import McpSearchCall
 from app.models.product import Product
 from app.models.user import User  # noqa: F401 — registers User so Product.seller resolves
 
 mcp = MCPServer("Marketplace")
 
 MAX_RESULTS = 10
+
+# Shared by ALL MCP users (see McpSearchCall). Only search is limited: it calls
+# Voyage; get_product is a plain DB read.
+SEARCH_LIMIT_PER_MINUTE = 20
 
 
 def _product_dict(p: Product) -> dict:
@@ -46,6 +53,18 @@ def search_products(query: str, max_price: float | None = None) -> list[dict] | 
     """
     db = SessionLocal()
     try:
+        since = datetime.now(timezone.utc) - timedelta(minutes=1)
+        recent = (
+            db.query(func.count(McpSearchCall.id))
+            .filter(McpSearchCall.created_at > since)
+            .scalar()
+        )
+        if recent >= SEARCH_LIMIT_PER_MINUTE:
+            # Same style as the EmbeddingError branch: a readable text result
+            # the calling model can relay ("try again in a minute").
+            return "Search is busy right now. Try again in a minute."
+        db.add(McpSearchCall())
+        db.commit()
         return [_product_dict(p) for p in search_in_stock(db, query, max_price, MAX_RESULTS)]
     except EmbeddingError:
         return "Search is temporarily unavailable. Try again in a minute."
